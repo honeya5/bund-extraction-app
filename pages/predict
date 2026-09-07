@@ -1,0 +1,112 @@
+import numpy as np
+import streamlit as st
+
+from utils import (
+    load_model,
+    read_image_any_format,
+    preprocess,
+    run_inference,
+    mask_to_png_bytes,
+    overlay_mask_on_image,
+    estimate_field_area_hectares,
+    HF_MODEL_REPO,
+)
+
+st.set_page_config(page_title="Predict — Bund Extraction", page_icon="🔍", layout="wide")
+
+st.title("🔍 Predict")
+st.caption("Upload a satellite image chip to predict field/bund boundaries.")
+
+st.info(
+    "⚠️ **Scope note:** This model was trained on Sentinel-2 satellite imagery (10m resolution) "
+    "from Luxembourg. It performs best on similar low-resolution satellite imagery of farmland, "
+    "and may perform poorly on high-resolution aerial photos, drone imagery, or imagery from "
+    "very different regions/crop types — a known limitation (domain shift) of the current model.",
+    icon="⚠️",
+)
+
+uploaded_file = st.file_uploader(
+    "Upload a satellite image (JPG, PNG, or TIF)",
+    type=["jpg", "jpeg", "png", "tif", "tiff"],
+)
+
+if uploaded_file is not None:
+    try:
+        model = load_model()
+    except Exception as e:
+        st.error(
+            f"Could not load the model from Hugging Face repo `{HF_MODEL_REPO}`.\n\n"
+            f"Error: {e}"
+        )
+        st.stop()
+
+    with st.spinner("Running inference..."):
+        raw_arr = read_image_any_format(uploaded_file)
+        tensor, display_arr = preprocess(raw_arr)
+        prob_map, binary_mask = run_inference(model, tensor, threshold=0.5)
+
+    # Store in session state so other pages (Threshold Explorer, Skeletonization)
+    # can reuse this prediction without re-uploading or re-running the model.
+    st.session_state["display_arr"] = display_arr
+    st.session_state["prob_map"] = prob_map
+    st.session_state["binary_mask"] = binary_mask
+    st.session_state["last_filename"] = uploaded_file.name
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.subheader("Input Image")
+        st.image(display_arr, use_container_width=True)
+
+    with col2:
+        st.subheader("Predicted Bund Mask")
+        st.image(binary_mask * 255, use_container_width=True, clamp=True)
+
+    with col3:
+        st.subheader("Overlay")
+        st.image(overlay_mask_on_image(display_arr, binary_mask), use_container_width=True)
+
+    st.divider()
+
+    stat_col1, stat_col2 = st.columns(2)
+    with stat_col1:
+        pred_pixel_frac = float(binary_mask.mean())
+        st.metric("Boundary pixel coverage", f"{pred_pixel_frac*100:.2f}%")
+    with stat_col2:
+        area_ha = estimate_field_area_hectares(binary_mask)
+        st.metric("Estimated open-field area", f"{area_ha:.1f} ha", help=(
+            "Illustrative estimate assuming Sentinel-2 native resolution (10m/pixel). "
+            "Not a precise georeferenced measurement."
+        ))
+
+    dl_col1, dl_col2 = st.columns(2)
+    with dl_col1:
+        st.download_button(
+            "Download predicted mask (PNG)",
+            data=mask_to_png_bytes((binary_mask * 255).astype(np.uint8)),
+            file_name="predicted_bund_mask.png",
+            mime="image/png",
+        )
+    with dl_col2:
+        st.download_button(
+            "Download raw probability map (PNG)",
+            data=mask_to_png_bytes((prob_map * 255).astype(np.uint8)),
+            file_name="prediction_probability.png",
+            mime="image/png",
+        )
+
+    st.success(
+        "✅ Prediction saved for this session — head to **🎚️ Threshold Explorer** or "
+        "**🧵 Skeletonization** to explore it further without re-uploading."
+    )
+
+else:
+    st.info("👆 Upload a satellite image chip to get started.")
+    st.markdown(
+        """
+**Tips for best results:**
+- Works best on Sentinel-2-style RGB imagery of farmland (similar to the training data)
+- Images are automatically resized to 256×256 for the model
+- For GeoTIFF inputs, only the RGB bands are used
+"""
+    )

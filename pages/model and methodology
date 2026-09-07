@@ -1,0 +1,88 @@
+import streamlit as st
+
+st.set_page_config(page_title="Model & Methodology — Bund Extraction", page_icon="📊", layout="wide")
+
+st.title("📊 Model & Methodology")
+
+st.subheader("Problem")
+st.write(
+    "Agricultural field boundaries (bunds) are important for land parcel demarcation, "
+    "cadastral mapping, precision agriculture, and soil/water conservation. Manual "
+    "delineation from field surveys or imagery is labor-intensive and does not scale "
+    "to large agricultural regions. This project frames bund extraction as a semantic "
+    "segmentation problem: predicting pixel-level boundary masks directly from satellite imagery."
+)
+
+st.subheader("System Architecture")
+st.image(
+    "assets/architecture_diagram.png",
+    caption="End-to-end system: user uploads an image through the interface, which is "
+    "preprocessed and passed to the U-Net model, evaluated, post-processed, and returned "
+    "as a downloadable boundary map.",
+    use_container_width=True,
+)
+
+st.subheader("Model Architecture")
+st.image(
+    "assets/unet_architecture.png",
+    caption="U-Net with a pretrained ResNet34 encoder. Skip connections preserve fine "
+    "spatial detail needed to reconstruct thin boundary structures.",
+    use_container_width=True,
+)
+
+st.subheader("Training Setup")
+col_a, col_b = st.columns(2)
+with col_a:
+    st.markdown(
+        """
+- **Dataset:** Fields of the World (FTW), Luxembourg subset
+- **Split:** 579 train / 145 validation chips (from 724 total)
+- **Augmentation:** horizontal/vertical flips, 90° rotations, brightness/contrast jitter
+- **Ground truth:** boundary masks derived from field parcel instance
+  masks via edge detection + morphological dilation
+"""
+    )
+with col_b:
+    st.markdown(
+        """
+- **Architecture:** U-Net, ResNet34 encoder (ImageNet pretrained)
+- **Loss:** 0.5 × Dice Loss + 0.5 × Binary Cross-Entropy
+- **Optimizer:** Adam, lr = 1e-4, with ReduceLROnPlateau
+- **Training:** 30 epochs on a Colab GPU
+"""
+    )
+
+st.subheader("Training Curves")
+st.image(
+    "assets/training_curves.png",
+    caption="Training/validation loss and validation IoU across 30 epochs — clean "
+    "convergence with no overfitting.",
+    use_container_width=True,
+)
+
+st.subheader("Validation Metrics")
+st.table(
+    {
+        "Metric": ["IoU", "F1-score", "Precision", "Recall"],
+        "Score": [0.50, 0.67, 0.64, 0.71],
+    }
+)
+
+st.subheader("Known Limitations")
+st.markdown(
+    """
+- Trained on a single country (Luxembourg) — generalization to other regions/sensors is limited (domain shift)
+- Performs best on Sentinel-2-style imagery; not designed for high-resolution aerial/drone photos
+- Slight over-thickening and occasional spurious lines in visually dense areas with mixed roads/buildings
+"""
+)
+
+st.subheader("Planned Extensions (Next Semester)")
+st.markdown(
+    """
+1. **Multi-region generalization** — train/evaluate across multiple FTW country subsets,
+   measuring generalization to unseen regions
+2. **Vector output** — convert predicted masks into GeoJSON/shapefile polygons with
+   per-field area calculation, for direct GIS use
+"""
+)

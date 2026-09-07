@@ -1,0 +1,60 @@
+import numpy as np
+import streamlit as st
+
+from utils import overlay_mask_on_image, mask_to_png_bytes, ensure_prediction_in_session
+
+st.set_page_config(page_title="Threshold Explorer — Bund Extraction", page_icon="🎚️", layout="wide")
+
+st.title("🎚️ Threshold Explorer")
+st.caption(
+    "The model outputs a probability at every pixel. This page lets you see how the "
+    "final boundary mask changes as you move the decision threshold — without re-running "
+    "the model."
+)
+
+if ensure_prediction_in_session():
+    prob_map = st.session_state["prob_map"]
+    display_arr = st.session_state["display_arr"]
+
+    threshold = st.slider(
+        "Decision threshold",
+        min_value=0.05, max_value=0.95, value=0.50, step=0.05,
+        help="Pixels with predicted probability above this value are classified as boundary.",
+    )
+
+    live_mask = (prob_map > threshold).astype(np.uint8)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.subheader("Probability Map")
+        st.image(prob_map, use_container_width=True, clamp=True)
+        st.caption("Raw model confidence at every pixel (brighter = more confident boundary).")
+
+    with col2:
+        st.subheader(f"Mask @ threshold = {threshold:.2f}")
+        st.image(live_mask * 255, use_container_width=True, clamp=True)
+
+    with col3:
+        st.subheader("Overlay")
+        st.image(overlay_mask_on_image(display_arr, live_mask), use_container_width=True)
+
+    st.divider()
+    coverage = float(live_mask.mean()) * 100
+    st.metric("Boundary pixel coverage at this threshold", f"{coverage:.2f}%")
+
+    st.markdown(
+        """
+**What's happening here:** lowering the threshold makes the model more liberal — it
+labels more pixels as "boundary," picking up fainter, less-certain edges but also
+more false positives. Raising it makes the model more conservative — cleaner lines,
+but some real (fainter) boundaries may be missed. The training/evaluation threshold
+used for the reported metrics (IoU 0.50, F1 0.67) was **0.50**.
+"""
+    )
+
+    st.download_button(
+        "Download this mask (PNG)",
+        data=mask_to_png_bytes((live_mask * 255).astype(np.uint8)),
+        file_name=f"bund_mask_threshold_{threshold:.2f}.png",
+        mime="image/png",
+    )
